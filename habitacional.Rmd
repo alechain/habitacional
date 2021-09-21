@@ -1,0 +1,246 @@
+---
+title: "Análisis habitacional"
+header-includes:
+   - \usepackage{pdfpages}
+   - \usepackage[default]{open sans}
+   - \usepackage[T1]{fontenc}
+   - \usepackage{graphicx}
+   - \usepackage{fancyhdr}
+   - \usepackage{hyperref}
+   - \usepackage{xcolor}
+   - \usepackage{sidecap}
+   - \usepackage[spanish]{babel}
+   - \pagestyle{fancy}
+   - \renewcommand{\headrulewidth}{0pt}
+   - \fancyhead{}
+   - \setlength{\headheight}{23pt}
+   - \lhead{\includegraphics[width=7cm,height=140cm]{"./logos/logo_oecc.pdf"}}
+   - \fancyfoot{}
+   - \lfoot{\includegraphics[width=5.0cm,height=140cm]{"./logos/muni.jpg"}}
+   - \rfoot{\thepage}
+   - \definecolor{graycustom}{HTML}{7b7b7e}
+   - \usepackage{floatrow}
+   - \floatsetup[figure]{capposition=top}
+   - \renewcommand{\arraystretch}{1.5}
+   - \usepackage{svg}
+   - \usepackage{amsmath}
+
+mainfont: Open Sans
+output: 
+  pdf_document: default
+  keep_tex: true
+includes:
+fig_caption: yes
+
+html_document:
+    df_print: paged
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, warning = FALSE,error=FALSE,message = FALSE)
+```
+```{r}
+library(tidyverse)
+library(eph)
+library(lubridate)
+library(kableExtra)
+library(ggtext)
+colores<- c("#29aee4","#0c8136","#e22172","#f4a018","#428cb4","#c85687","#dbac2f","#5da14a","#ff9a00")
+
+```
+
+
+
+```{r include=FALSE}
+eph_i<- get_microdata(year = 2016:2021,trimester = 1:4,type = 'individual')
+eph_h<- get_microdata(year = 2016:2021,trimester = 1:4,type = 'hogar')
+
+```
+```{r include=FALSE}
+eph_i<-eph_i %>% unnest(cols='microdata')
+eph_h<- eph_h %>% unnest(cols='microdata')
+
+eph_i<- eph_i %>% select(-c('year','trimester','wave','type'))
+eph_h<- eph_h %>%  select(-c('year','trimester','wave','type'))
+
+eph_total<- left_join(eph_i,eph_h,by=c('CODUSU','ANO4','TRIMESTRE', 'NRO_HOGAR'),suffix=c('','.y'))
+```
+```{r include=FALSE}
+eph_total<- eph_total %>%  mutate(PEA= case_when(ESTADO==3 ~ 0,
+                                                      ESTADO==4 ~ 0,
+                                                      ESTADO==1 ~ 1,
+                                                      ESTADO==2 ~ 1),
+                                       OCUPADOS= case_when(ESTADO==1 ~ 1,
+                                                           ESTADO==2 ~ 0,
+                                                           ESTADO==3 ~ 0,
+                                                           ESTADO==4 ~ 0),
+                                       DESOCUPADOS= case_when(ESTADO==1 ~ 0,
+                                                              ESTADO==2 ~ 1),
+                                       EMPLEADOS= case_when(PP04A==1 ~ "Empleados Publicos",
+                                                            PP04A==2 ~ "Empleados privados",
+                                                            PP04A==3 ~ "Otros",
+                                                            TRUE ~ NA_character_),
+                                       PP04B_COD=as.character(PP04B_COD),
+                                       PP04B_COD=case_when(nchar(PP04B_COD)==4~PP04B_COD,
+                                                       nchar(PP04B_COD)==1~ paste0("0",PP04B_COD,"00"),
+                                                       nchar(PP04B_COD)==2~ paste0(PP04B_COD,"00"),
+                                                       nchar(PP04B_COD)==3~ paste0("0",PP04B_COD)),
+                                       SECTOR= substr(PP04B_COD,1,2),
+                                       INFORMALES=case_when( CAT_OCUP==3 & PP07H==2 ~ 1,
+                                                             CAT_OCUP==3 & PP07H==1 ~ 0),
+                                       PP04D_COD = as.character(PP04D_COD),
+                                       PP04D_COD = case_when(nchar(PP04D_COD) == 5 ~ PP04D_COD,
+                                                             nchar(PP04D_COD) == 4 ~ paste0("0", PP04D_COD),
+                                                             nchar(PP04D_COD) == 3 ~ paste0("00", PP04D_COD),
+                                                             nchar(PP04D_COD) == 2 ~ paste0("000", PP04D_COD),
+                                                             nchar(PP04D_COD) == 1 ~ paste0("0000", PP04D_COD)),
+                                       CALIFICACION = substr(PP04D_COD, 5, 5),
+                                       CALIFICACION = case_when(CALIFICACION=="1" ~ "Profesionales",
+                                                                CALIFICACION=="2" ~ "Técnicos",
+                                                                CALIFICACION=="3" ~ "Operativos",
+                                                                CALIFICACION=="4" ~ "No Calificados"),
+                                       CALIFICACION = factor(CALIFICACION, c("No Calificados", "Operativos", "Técnicos", "Profesionales")),
+                                       TIPOCALIFICACION= case_when(CALIFICACION=="Profesionales" | CALIFICACION== "Técnicos" ~ "Calificado",
+                                                                          CALIFICACION=="No Calificados" | CALIFICACION=="Operativos" ~ "No calificado"),
+                           SEXO= case_when(CH04==1 ~ "Hombres",
+                                           CH04==2 ~ "Mujeres"),
+                            niveled=case_when(NIVEL_ED==1 | NIVEL_ED==7 ~ "Sin\ninstrucción",
+                                            NIVEL_ED %in% c(2,3) ~ "Primario\nCompleto",
+                                            NIVEL_ED %in% c(4,5)~ "Secundario\nCompleto",
+                                            NIVEL_ED == 6 ~ "Superior/Universitario\ncompleto"),
+                          niveled=factor(niveled, levels = c("Sin\ninstrucción","Primario\nCompleto","Secundario\nCompleto","Superior/Universitario\ncompleto")),
+                          edad=case_when( CH06<18 ~ "Menores a 18",
+                                     CH06>=18 & CH06<29 ~ "18 a 28",
+                                     CH06>=29 & CH06<40 ~ "29 a 39",
+                                     CH06>=40 & CH06<51 ~ "40 a 50",
+                                     CH06>=51 & CH06<62 ~ "51 a 61",
+                                     CH06>=61 ~ "61+"),
+                      edad=factor(edad,levels = c("Menores a 18", "18 a 28", "29 a 39", "40 a 50", "51 a 61", "61+")),
+                      
+                           horastrabtotales= PP3E_TOT + PP3F_TOT)
+```
+
+```{r include=FALSE}
+eph_total<- left_join(eph_total,eph::adulto_equivalente) 
+regiones<- eph::diccionario_regiones 
+names(regiones)<- c('REGION', 'region')
+eph_total<- left_join(eph_total,regiones,by="REGION")
+eph_total <- eph_total %>% mutate(periodo=paste0(ANO4,'.',TRIMESTRE))
+eph_total<- left_join(eph_total, eph::get_poverty_lines(regional = TRUE))
+eph_total<- eph_total %>% group_by(CODUSU,ANO4,TRIMESTRE, NRO_HOGAR) %>% mutate(AEH=sum(adequi)) %>% ungroup()
+
+eph_total<- eph_total %>% mutate(CBAEQ=CBA*AEH,
+                         CBTEQ=CBT*AEH)
+
+eph_total<- eph_total %>% mutate(condicion=case_when(ITF<CBAEQ ~ "Indigente",
+                                             ITF>=CBAEQ & ITF<CBTEQ ~ "Pobre",
+                                             ITF>=CBTEQ ~ "No Pobre"))
+```
+
+```{r include=FALSE}
+eph_total<- eph_total %>% mutate(regimen_prop=case_when(II7 %in% c(1,2) ~ 'Propietario',
+                                                        II7 %in% c(3) ~ 'Inquilino',
+                                                        TRUE ~ 'Irregular'))
+eph_cor<- eph_total %>% filter(ANO4==2020,AGLOMERADO==12,CH03==1)
+
+```
+# Régimen de tenencia habitacional de los hogares
+Para el análisis del régimen de tenencia habitacional de los hogares en la Ciudad de Corrientes se utilizara como unidad de análisis al jefe de hogar.
+La elección de esta unidad de análisis se realiza para disminuir las distorsiones que puede generar la correlación entre niveles de hacinamiento y el régimen de tenencia de las personas. 
+
+```{r }
+reg_ten_tabla<-eph_cor %>% group_by('Régimen de tenencia'=regimen_prop) %>% summarise(Porcentaje=formattable::percent(sum(PONDERA)/sum(eph_cor$PONDERA))) 
+
+  kbl(reg_ten_tabla, caption = "Porcentaje de hogares en la Ciudad de Corrientes S/ régimen de tenencia habitacional", booktabs = T) %>%
+kable_styling(latex_options = c("striped", "hold_position"))
+
+```
+
+Como se puede ver en la tabla 1, el 67.86% de los hogares en la Ciudad de Corrientes son propietarios de sus viviendas, mientras que el 32.14% se encuentran en situaciones de inquilinato u ocupación irregular.
+
+## Régimen de tenencia habitacional según el género del jefe/a de hogar
+
+La jefatura de hogar de cada nucleo familiar puede estar a cargo de hombres o mujeres. A continuación se realiza el análisis del régimen de tenencia según el género del jefe/a del hogar.
+
+```{r fig.height=3.5}
+ten_sex<-  eph_cor %>% group_by(SEXO,'Regimen de tenencia'=regimen_prop) %>% summarise(sum(PONDERA))
+ten_sex<- ten_sex %>% pivot_wider(names_from=SEXO,values_from = `sum(PONDERA)` )
+ten_sex['Hombres']<-(ten_sex['Hombres']/ (eph_cor %>% filter(SEXO=='Hombres') %>% summarise(sum(PONDERA)) %>% pull()))
+ten_sex['Mujeres']<-(ten_sex['Mujeres']/ (eph_cor %>% filter(SEXO=='Mujeres') %>% summarise(sum(PONDERA)) %>% pull()))
+
+ten_sex$Hombres<- formattable::percent(ten_sex$Hombres)
+ten_sex$Mujeres<- formattable::percent(ten_sex$Mujeres)
+
+ten_sex<- ten_sex %>% pivot_longer(-`Regimen de tenencia`)
+
+
+ten_sex %>% ggplot(mapping = aes(x=`Regimen de tenencia`,y=value)) + geom_col(aes(fill=name),position = 'stack',show.legend = F)+ geom_text(aes(label=value),nudge_y = 0.05) + facet_grid(~name) + scale_y_continuous(labels = scales::percent_format()) + labs(title = "Regimen de tenencia de la vivienda de <span style = 'color: #29aee4;'>**Hombres**</span> y <span style='color: #0c8136;'>**Mujeres**</span> ",subtitle = 'Año 2020',caption = 'Elaboración propia en base a EPH-INDEC')+xlab('')+ylab('')+theme(plot.title.position = 'plot',strip.background = element_blank(),strip.text = element_text(face = 'bold'),panel.background  = element_blank(),plot.title = element_markdown() , axis.line = element_line(),axis.text = element_text(color='BLACK')) + scale_fill_manual(values=colores)
+```
+Cómo se puede ver en el gráfico x, las familias que tienen como jefa de hogar a una mujer son mas propensas a no ser propietarias de su vivienda y a encontrarse en condiciones de inquilinato que aquellas en las que el jefe de hogar es un hombre. 
+
+## Régimen de tenencia habitacional según la edad del jefe de hogar
+
+La edad del jefe de hogar puede condicionar el acceso a una vivienda propia, siendo que la posibilidad de acumulación de ahorros es una función del ingreso percibido a lo largo de la vida laboral.
+
+A continuación se presenta el acceso a la vivienda para los distintos rangos etarios.
+
+```{r fig.height=3.5}
+ten_edad<-  eph_cor %>% group_by(edad,'Regimen de tenencia'=regimen_prop) %>% summarise(sum(PONDERA))
+ten_edad<- ten_edad %>% pivot_wider(names_from=edad,values_from = `sum(PONDERA)` )
+ten_edad['18 a 28']<-(ten_edad['18 a 28']/ (eph_cor %>% filter(edad=='18 a 28') %>% summarise(sum(PONDERA)) %>% pull()))
+
+ten_edad['29 a 39']<-(ten_edad['29 a 39']/ (eph_cor %>% filter(edad=='29 a 39') %>% summarise(sum(PONDERA)) %>% pull()))
+ten_edad['40 a 50']<-(ten_edad['40 a 50']/ (eph_cor %>% filter(edad=='40 a 50') %>% summarise(sum(PONDERA)) %>% pull()))
+ten_edad['51 a 61']<-(ten_edad['51 a 61']/ (eph_cor %>% filter(edad=='51 a 61') %>% summarise(sum(PONDERA)) %>% pull()))
+ten_edad['61+']<-(ten_edad['61+']/ (eph_cor %>% filter(edad=='61+') %>% summarise(sum(PONDERA)) %>% pull()))
+
+
+
+
+ten_edad$`18 a 28`<- formattable::percent(ten_edad$`18 a 28`)
+ten_edad$`29 a 39`<- formattable::percent(ten_edad$`29 a 39`)
+ten_edad$`40 a 50`<- formattable::percent(ten_edad$`40 a 50`)
+ten_edad$`51 a 61`<- formattable::percent(ten_edad$`51 a 61`)
+ten_edad$`61+`<- formattable::percent(ten_edad$`61+`)
+
+ten_edad<-ten_edad %>% select(-`Menores a 18`)
+
+ten_edad<- ten_edad %>% pivot_longer(-`Regimen de tenencia`)
+
+ten_edad %>% ggplot(mapping = aes(x=name,y=value, label=value, fill=`Regimen de tenencia`)) + geom_col(position = 'stack',show.legend = T)+ geom_text(position = position_fill(vjust = 0.5),size=3) + scale_y_continuous(labels = scales::percent_format()) + labs(title = "Regimen de tenencia de la vivienda por rango etario ",subtitle = 'Año 2020',caption = 'Elaboración propia en base a EPH-INDEC', fill="Regimen de tenencia:")+xlab('')+ylab('')+theme(plot.title.position = 'plot',strip.background = element_blank(),strip.text = element_text(face = 'bold'),panel.background  = element_blank(),legend.position = 'bottom',plot.title = element_markdown() , axis.line = element_line(),axis.text = element_text(color='BLACK')) + scale_fill_manual(values=colores)
+
+
+```
+En el gráfico se puede ver como la tenencia de una vivienda propia va disminuyendo conforme es menor la edad de la persona que es jefe/a de hogar. Para las familias compuestas por jefes/as de hogar jóvenes en la Ciudad de Corrientes es mucho mas probable que se encuentren habitando una vivienda que es alquilada o esta siendo ocupada de manera irregular.
+
+## Régimen de tenencia habitacional según la incidencia en la pobreza del jefe de hogar
+
+La pobreza, especificamente la capturada a través del método de la linea de la pobreza, intenta captar la incapacidad coyuntural de satisfacción de las necesidades básicas de las familias. Estar por debajo de la linea de la pobreza indica una situación de vulnerabilidad económica que puede ser medida en un momento determinado, sin embargo, la pobreza estructural es considerablemente más nociva a nivel de marginación social que la pobreza coyuntural. La falta de seguridad habitacional no solamente se limita a la incapacidad temporal de satisfacer necesidades básicas, sino que presenta un problema estructural de incapacidad en la satisfacción de  los derechos básicos de las personas. 
+
+Para analizar la seguridad habitacional de las personas pobres y no pobres, medidas según el método de la linea de la pobreza, se presenta a continuación el régimen de tenencia de las viviendas según la incidencia en la pobreza del jefe/a de hogar.
+
+```{r}
+eph_cor<- eph_cor %>% mutate(pobre=case_when(condicion %in% c('Pobre','Indigente') ~ 'Pobre',
+                                             condicion== 'No Pobre' ~ 'No Pobre'))
+ten_pobre<-  eph_cor %>% group_by(pobre,'Regimen de tenencia'=regimen_prop) %>% summarise(sum(PONDERA))
+ten_pobre<- ten_pobre %>% pivot_wider(names_from=pobre,values_from = `sum(PONDERA)` )
+ten_pobre['Pobre']<-(ten_pobre['Pobre']/ (eph_cor %>% filter(pobre=='Pobre') %>% summarise(sum(PONDERA)) %>% pull()))
+ten_pobre['No Pobre']<-(ten_pobre['No Pobre']/ (eph_cor %>% filter(pobre=='No Pobre') %>% summarise(sum(PONDERA)) %>% pull()))
+
+
+ten_pobre$Pobre<- formattable::percent(ten_pobre$Pobre)
+ten_pobre$`No Pobre`<- formattable::percent(ten_pobre$`No Pobre`)
+
+
+
+
+ten_pobre<- ten_pobre %>% pivot_longer(-`Regimen de tenencia`)
+library(treemapify)
+ten_pobre %>% ggplot(mapping=aes(area=value,fill=`Regimen de tenencia`,label=value)) + geom_treemap() + facet_wrap(facets = vars(name),nrow = 2) + geom_treemap_text(grow = FALSE,place = 'centre') + scale_fill_manual(values = colores) + labs(title = "Regimen de tenencia de la vivienda S/ incidencia en la pobreza ",subtitle = 'Año 2020',caption = 'Elaboración propia en base a EPH-INDEC', fill="Regimen de tenencia:")+xlab('')+ylab('')+theme(plot.title.position = 'plot',strip.background = element_blank(),strip.text = element_text(face = 'bold'),panel.background  = element_blank(),legend.position = 'bottom',plot.title = element_markdown() , axis.line = element_line(),axis.text = element_text(color='BLACK')) + scale_fill_manual(values=colores)
+```
+
+En el gráfico x se puede ver una particularidad, la proporción de propietarios de la vivienda en los casos que el jefe de hogar es pobre es mayor que en el caso de los no pobres.
+Por otro lado, los pobres tienen una mayor proporción de ocupación irregular que los no pobres, en donde se incluyen casos como ocupación de viviendas, de terreno, etc.
+
+
+
